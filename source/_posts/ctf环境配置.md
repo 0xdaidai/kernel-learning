@@ -280,6 +280,88 @@ sudo gem install one_gadget seccomp-tools
 
 ```
 
+## ubuntu22.04
+
+   ```bash
+#!/bin/sh
+set -x
+
+# apt mirror
+sudo tee /etc/apt/sources.list <<EOF
+deb https://mirrors.ustc.edu.cn/ubuntu/ jammy main restricted universe multiverse
+deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy main restricted universe multiverse
+
+deb https://mirrors.ustc.edu.cn/ubuntu/ jammy-security main restricted universe multiverse
+deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy-security main restricted universe multiverse
+
+deb https://mirrors.ustc.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse
+deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy-updates main restricted universe multiverse
+
+deb https://mirrors.ustc.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse
+deb-src https://mirrors.ustc.edu.cn/ubuntu/ jammy-backports main restricted universe multiverse
+EOF
+
+# necessary software
+sudo apt-get update \
+    && sudo apt-get install -y python3 python3-dev python3-pip \
+    gdb patchelf strace \
+    ruby ruby-dev \
+    gcc gcc-multilib g++-multilib nasm \
+    git wget curl neovim \
+    qemu-system docker docker-compose
+
+# gdb
+sudo sed -i "s/^kernel.yama.ptrace_scope = 1$/kernel.yama.ptrace_scope = 0/" /etc/sysctl.d/10-ptrace.conf
+
+# docker
+sudo tee /etc/docker/daemon.json <<EOF
+{
+    "registry-mirrors":[
+        "https://docker.mirrors.ustc.edu.cn",
+        "https://registry.docker-cn.com"
+    ]
+}
+EOF
+sudo usermod -aG docker ${USER}
+
+# neovim
+sudo ln -sf /usr/bin/nvim /usr/bin/vi \
+    && mkdir ~/.config/nvim \
+    && cat > ~/.config/nvim/init.vim <<EOF
+set nu
+set tabstop=4
+set shiftwidth=4
+set softtabstop=4
+set expandtab
+EOF
+
+# git
+git config --global user.name "hawk" \
+    && git config --global user.email 18801353760@163.com \
+    && git config --global core.editor vi
+
+# python
+python3 -m pip install -U --force-reinstall pip -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && python3 -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# pwntools
+python3 -m pip install pwntools
+
+# ropper
+python3 -m pip install ropper
+
+# pwndbg
+git config --global url."https://ghproxy.com/https://github.com/".insteadOf "https://github.com/" \
+    && git clone https://github.com/pwndbg/pwndbg.git ~/pwndbg \
+    && (cd ~/pwndbg && ./setup.sh) \
+    && git config --global --unset url."https://ghproxy.com/https://github.com/".insteadOf \
+    && python3 -m pip install pwnlib psutil
+
+# ruby
+sudo gem install one_gadget seccomp-tools
+
+```
+
 
 # patchelf
 
