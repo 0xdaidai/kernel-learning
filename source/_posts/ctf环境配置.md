@@ -724,11 +724,6 @@ qemu-system-x86_64 \
   | -no-shutdown | 当内核崩溃后，冻结在崩溃位置处 |
 
 
-## 调试环境
-
-  为了方便，根据上面的介绍，准备好了[调试环境](kernel.tar.gz)。
-  解压后，在`Makefile`中更改**KERNEL**指定内核映像即可
-
 ## 模板
 
 ### qemu启动脚本
@@ -849,6 +844,11 @@ void modprobe_exp()
 }
 
 ```
+
+## 调试环境
+
+  为了方便，根据上面的介绍，准备好了[调试环境](pwn.tar.gz)。
+  解压后，在`build.sh`中更改**KERNEL**指定内核映像即可
 
 # IDA
 
