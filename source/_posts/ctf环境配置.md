@@ -697,6 +697,7 @@ qemu-system-x86_64 \
  -kernel ${linux}/arch/x86_64/boot/bzImage \
  -initrd /path/to/rootfs.cpio \
  -monitor /dev/null \
+ -serial mon:stdio \
  -nographic \
  -append "rdinit=/linuxrc console=ttyS0 oops=panic panic=1 nokaslr" \
  -enable-kvm \
@@ -715,6 +716,7 @@ qemu-system-x86_64 \
   | -kernel | 内核镜像 |
   | -initrd | 文件系统镜像 |
   | -monitor | 重定向Qemu控制台，可以查看虚拟机状态 |
+  | -serial mon:dev_string | 当监视器以这种方式多路复用到 **stdio** 时，`Ctrl+C` 将不再终止 QEMU，而是传递给来宾 |
   | -append | kernel的参数，[参考链接](https://docs.kernel.org/admin-guide/kernel-parameters.html)<br>**root**:根文件系统对应的设备，有默认值 <br>**init**:制定内核执行的第一条命令，有默认值 <br>**console**:console对应的设备，一般用**ttyS0**，从而重定向到串口 |
   | -enable-kvm | 开启KVM虚拟化 |
   | -nographic | 关闭Qemu GUI。可以使用-monitor重定向Qemu控制台;-serial重定向guest串口信息; -display重定向guest的GUI |
@@ -756,6 +758,7 @@ qemu-system-x86_64 \
     -m 128M \
     -nographic \
     -monitor /dev/null \
+    -serial mon:stdio \
     -kernel ${KERNEL} \
     -append 'console=ttyS0 loglevel=3 oops=panic panic=1 nokaslr' \
     -initrd ${ROOTFS} \
@@ -847,8 +850,7 @@ void modprobe_exp()
 
 ## 调试环境
 
-  为了方便，根据上面的介绍，准备好了[调试环境](pwn.tar.gz)。
-  解压后，在`build.sh`中更改**KERNEL**指定内核映像即可
+  为了方便，根据上面的介绍，准备好了[调试环境](kernel.tar.gz)。
 
 # IDA
 
