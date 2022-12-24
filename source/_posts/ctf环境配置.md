@@ -853,20 +853,23 @@ add-symbol-file driver/vuln.ko $driver_base
 
 ```c
 #define _GNU_SOURCE
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <linux/userfaultfd.h>
-#include <unistd.h>
-#include <sys/syscall.h> 
-#include <sys/mman.h>
-#include <pthread.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <linux/userfaultfd.h>
 #include <poll.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/ipc.h>
+#include <sys/mman.h>
+#include <sys/msg.h>
+#include <sys/stat.h>
+#include <sys/syscall.h> 
+#include <sys/types.h>
+#include <unistd.h>
 
 /* Global variables
  * 定义使用到的全局变量
@@ -875,6 +878,15 @@ add-symbol-file driver/vuln.ko $driver_base
 int gfd1, gfd2, gfd3, gfd4;
 void *gaddr1, *gaddr2, *gaddr3, *gaddr4;
 uint64_t glen1, glen2, glen3, glen4;
+
+
+/* Structures
+ * 定义辅助结构体
+ */
+struct list_head {
+	struct list_head *next, *prev;
+};
+
 
 
 /* Macros
@@ -891,7 +903,8 @@ uint64_t glen1, glen2, glen3, glen4;
         exit(EXIT_FAILURE); \
     } \
 }
-
+#define offsetof(TYPE, MEMBER) \
+    ((size_t) &((TYPE*)0)->MEMBER) \
 
 
 /* modprobe_path提权
@@ -900,7 +913,8 @@ uint64_t glen1, glen2, glen3, glen4;
  * 更改为 `/tmp/a`, 即 *(modprobe_path) = 0x612f706d742f
  *
  *
- * 参考: https://www.anquanke.com/post/id/232545#h3-6
+ * 参考:
+ * https://www.anquanke.com/post/id/232545#h3-6
  */
 void modprobe_exp()
 {
@@ -944,23 +958,26 @@ void modprobe_exp()
  *
  *
  * 参数:
- *      1. @addr是通过mmap(NULL, len, PROT_READ | PROT_WRITE,
-                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)
- * 申请的，此时内核仅仅分配了页表，并未分配物理页进行映射
- *      2. @len为通过mmap申请@addr时，传入的@len值
- *      3. @thread为自定义的进程 handler，其用于与内核进行交互，从而触发
- * page fault
- *      3. @handler为自定义的userfaultfd handler，其会在内核进程触发
- * page fault时，在userfaultfd_handler中被调用。其接受@page为参数，@page页
- * 内容在调用完@handler后，被用于初始化分配给内核进程的页
+ *      1. userfaultfd_exp():@addr是通过
+ * mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_PRIVATE
+        | MAP_ANONYMOUS, -1, 0) 申请的，此时内核仅仅分配了页表，
+ * 并未分配物理页进行映射
+ *      2. userfaultfd_exp():@len为通过mmap申请@addr时，传入的@len值
+ *      3. userfaultfd_exp():@thread为自定义的进程 handler，其用于与内核进行交互，
+ * 从而触发page fault
+ *      3. userfaultfd_exp():@handler为自定义的userfaultfd handler，
+ * 其会在内核进程触发page fault时，在userfaultfd_handler中被调用。
+ * 其接受@page为参数，@page页内容在调用完@handler后，被用于初始化分配给内核进程的页
  *
  *
  * 返回值:
- *      @ret返回@thread创建的pthread_t，用于进程同步. 在直白一些，通过调用
- * pthread_join(@ret)，确保@thread已经触发page fault，并且@handler已经被执行结束
+ *      1. userfaultfd_exp():@ret返回@thread创建的pthread_t，用于进程同步. 
+ * 在直白一些，通过调用pthread_join(@ret)，确保@thread已经触发page fault，
+ * 并且@handler已经被执行结束
  *
  *
- * 参考: https://ctf-wiki.org/pwn/linux/kernel-mode/exploitation/userfaultfd/
+ * 参考:
+ * https://ctf-wiki.org/pwn/linux/kernel-mode/exploitation/userfaultfd/
  */
 struct uffd_arg {
     int uffd;                       /* 在userfaultfd_exp()中的uffd局部变量 */
@@ -969,7 +986,6 @@ struct uffd_arg {
                                      * 中，被用于初始化触发page fault的页 */
     int pg_size;                    /* 即页的大小 */
 };
-
 static void * userfaultfd_handler(void *arg)
 {
     struct uffd_msg msg;
@@ -1011,7 +1027,6 @@ static void * userfaultfd_handler(void *arg)
 
     return NULL;
 }
-
 pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
                      void *(*handler)(void *page))
 {
@@ -1051,12 +1066,103 @@ pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
     return thr;
 }
 
+/* struct msg_msg原语
+ * 结构体:
+ *          struct msg_msg {
+ *              struct list_head m_list;
+ *              long m_type;
+ *              size_t m_ts;    // message text大小
+ *              struct msg_msgseg *next;
+ *              void *security; // 由于未开启SELinux，该字段恒为0
+ *              // 用户定义数据从这里开始
+ *          };
+ *
+ * 条件:
+ *      1. 驱动中存在UAF，可以更改内存的[0x18, 0x28)处的值
+ *      2. 如果更改了内存的[0x0, 0x10)的值，则需要调用recv_msg()，其需要内核
+ * 开启CONFIG_CHECKPOINT_RESTORE设置；否则调用recv_msg_nocopy()即可
+ *      3. recv_msg()读取信息时，需要和struct msg_msg的m_ts相同大小，否则会
+ * 返回异常
+ *
+ * 参数:
+ *      1. send_msg():@size，指内核态申请的内存大小，其会包含0x30的
+ * struct msg_msg头
+ *      2. send_msg():@content, 即用户定义的消息内容，其会被复制到
+ * 内核态申请的内存中，主要用来查找这部分内存，可以设置为标志性字符串，如
+ * "hhaawwkk1"等
+ *      3. send_msg():@content_size，即用户定义的消息内容数组长度
+ *      4. recv_msg*():@qid，消息队列id，用来标识不同队列，是send_msg()
+ * 返回值
+ *      5. recv_msg*():@size，想要从消息队列中获取的字节数，其包含0x8的mtype
+ * 内容
+ *
+ * 返回值:
+ *      1. send_msg():@ret返回创建的消息队列id
+ *      2. recv_msg*():@ret返回读取的缓冲数组
+ *
+ * 参考:
+ * https://www.anquanke.com/post/id/252558
+ * https://elixir.bootlin.com/linux/v6.1/source/ipc/msg.c#L848
+ */
+ struct msg_msg {
+    struct list_head m_list;
+    long m_type;
+    size_t m_ts;    // message text大小
+    struct msg_msgseg *next;
+    void *security; // 由于未开启SELinux，该字段恒为0
+};
+int send_msg(size_t size, const char *content, size_t content_size) {
+
+    int qid;
+    struct _msgbuf {
+        long mtype;
+        char mtext[size - 0x30];
+    } msg;
+
+    // 创建
+    assert((qid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT)) != -1);
+
+    msg.mtype = 1;
+    memcpy(msg.mtext, content, content_size);
+    assert(msgsnd(qid, &msg, sizeof(msg.mtext), 0) != -1);
+
+    return qid;
+}
+#define send_msg_str(size, msg) (send_msg((size), (msg), strlen(msg)+1))
+void *recv_msg(int qid, size_t size) {
+
+    void *memdump;
+
+    assert((memdump = malloc(size)) != NULL);
+
+    if(msgrcv(qid, memdump, size, 0, IPC_NOWAIT | MSG_COPY | MSG_NOERROR) == -1) {
+        perror("msgrcv");
+        return NULL;
+    }
+
+    return memdump;
+}
+void *recv_msg_nocopy(int qid, size_t size) {
+
+    void *memdump;
+
+    assert((memdump = malloc(size)) != NULL);
+
+    if(msgrcv(qid, memdump, size, 0, IPC_NOWAIT | MSG_NOERROR) == -1) {
+        perror("msgrcv");
+        return NULL;
+    }
+
+    return memdump;
+}
+
 
 /* 本次exp的符号定义
  */
-
 #define VULN_WRITE		0x1737
 #define VULN_READ		0x1738
+#define VULN_ALLOC		0x1739
+#define VULN_FREE		0x173A
 
 long long *modprobe_path = (long long*) 0xffffffff82851480;
 long long fake_modprobe_path = 0x612f706d742f;
@@ -1125,6 +1231,35 @@ int main(void)
     //// 等待uf_thr终止
     //assert(pthread_join(thread, NULL) == 0);
     //modprobe_exp();
+
+
+
+    ///* 尝试利用struct msg_msg结构体
+    // * 进行数据读取或写入
+    // */
+    //Data data;
+    //char *kbuf1, *kbuf2;
+    //int qid, size = 0x80;
+    //assert((gfd1 = open("/dev/vuln", O_RDWR)) >= 0);
+
+    //// 内核态申请0x80大小的内存
+    //data.val = size;
+    //assert(ioctl(gfd1, VULN_ALLOC, &data) == 0)
+    //kbuf1 = (char *)data.addr;
+
+    //// 制造UAF
+    //assert(ioctl(gfd1, VULN_FREE, &data) == 0)
+
+    //// 开始heap spray
+    //qid = send_msg_str(size, "hhaawwkk1");
+
+    //// 修改UAF的struct msg_msg的m_ts字段
+    //data.addr = (long long*)(kbuf1 + offsetof(struct msg_msg, m_ts));
+    //data.val = 0x1000;
+    //assert(ioctl(gfd1, VULN_WRITE, &data) == 0);
+
+    //assert((kbuf2 = recv_msg_nocopy(qid, 0x1000)) != NULL);
+    //assert(((long long)kbuf1 + 0x100) == ((long long*)kbuf2)[0x13]);
     return 0;
 }
 ```
