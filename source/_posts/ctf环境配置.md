@@ -851,6 +851,413 @@ add-symbol-file driver/vuln.ko $driver_base
 
 ### exp
 
+
+#### 系统调用
+参考[arch/x86/entry/syscalls/syscall_64.tbl](https://elixir.bootlin.com/linux/latest/source/arch/x86/entry/syscalls/syscall_64.tbl)，使用如下命令`cat arch/x86/entry/syscalls/syscall_64.tbl | awk '{print $3,$2,$1}' | awk '{if(NF==3){print $0}}' | awk '{if($2=="common" || $2=="64" || $2=="x32"){printf "|%-30s|%-6s|%s|\n",$1,$2,$3}}'`，生成64位下的系统调用号
+
+| 系统调用名称 | abi | 系统调用号 |
+| :-: | :-: | :-: |
+|read                          |common|0|
+|write                         |common|1|
+|open                          |common|2|
+|close                         |common|3|
+|stat                          |common|4|
+|fstat                         |common|5|
+|lstat                         |common|6|
+|poll                          |common|7|
+|lseek                         |common|8|
+|mmap                          |common|9|
+|mprotect                      |common|10|
+|munmap                        |common|11|
+|brk                           |common|12|
+|rt_sigaction                  |64    |13|
+|rt_sigprocmask                |common|14|
+|rt_sigreturn                  |64    |15|
+|ioctl                         |64    |16|
+|pread64                       |common|17|
+|pwrite64                      |common|18|
+|readv                         |64    |19|
+|writev                        |64    |20|
+|access                        |common|21|
+|pipe                          |common|22|
+|select                        |common|23|
+|sched_yield                   |common|24|
+|mremap                        |common|25|
+|msync                         |common|26|
+|mincore                       |common|27|
+|madvise                       |common|28|
+|shmget                        |common|29|
+|shmat                         |common|30|
+|shmctl                        |common|31|
+|dup                           |common|32|
+|dup2                          |common|33|
+|pause                         |common|34|
+|nanosleep                     |common|35|
+|getitimer                     |common|36|
+|alarm                         |common|37|
+|setitimer                     |common|38|
+|getpid                        |common|39|
+|sendfile                      |common|40|
+|socket                        |common|41|
+|connect                       |common|42|
+|accept                        |common|43|
+|sendto                        |common|44|
+|recvfrom                      |64    |45|
+|sendmsg                       |64    |46|
+|recvmsg                       |64    |47|
+|shutdown                      |common|48|
+|bind                          |common|49|
+|listen                        |common|50|
+|getsockname                   |common|51|
+|getpeername                   |common|52|
+|socketpair                    |common|53|
+|setsockopt                    |64    |54|
+|getsockopt                    |64    |55|
+|clone                         |common|56|
+|fork                          |common|57|
+|vfork                         |common|58|
+|execve                        |64    |59|
+|exit                          |common|60|
+|wait4                         |common|61|
+|kill                          |common|62|
+|uname                         |common|63|
+|semget                        |common|64|
+|semop                         |common|65|
+|semctl                        |common|66|
+|shmdt                         |common|67|
+|msgget                        |common|68|
+|msgsnd                        |common|69|
+|msgrcv                        |common|70|
+|msgctl                        |common|71|
+|fcntl                         |common|72|
+|flock                         |common|73|
+|fsync                         |common|74|
+|fdatasync                     |common|75|
+|truncate                      |common|76|
+|ftruncate                     |common|77|
+|getdents                      |common|78|
+|getcwd                        |common|79|
+|chdir                         |common|80|
+|fchdir                        |common|81|
+|rename                        |common|82|
+|mkdir                         |common|83|
+|rmdir                         |common|84|
+|creat                         |common|85|
+|link                          |common|86|
+|unlink                        |common|87|
+|symlink                       |common|88|
+|readlink                      |common|89|
+|chmod                         |common|90|
+|fchmod                        |common|91|
+|chown                         |common|92|
+|fchown                        |common|93|
+|lchown                        |common|94|
+|umask                         |common|95|
+|gettimeofday                  |common|96|
+|getrlimit                     |common|97|
+|getrusage                     |common|98|
+|sysinfo                       |common|99|
+|times                         |common|100|
+|ptrace                        |64    |101|
+|getuid                        |common|102|
+|syslog                        |common|103|
+|getgid                        |common|104|
+|setuid                        |common|105|
+|setgid                        |common|106|
+|geteuid                       |common|107|
+|getegid                       |common|108|
+|setpgid                       |common|109|
+|getppid                       |common|110|
+|getpgrp                       |common|111|
+|setsid                        |common|112|
+|setreuid                      |common|113|
+|setregid                      |common|114|
+|getgroups                     |common|115|
+|setgroups                     |common|116|
+|setresuid                     |common|117|
+|getresuid                     |common|118|
+|setresgid                     |common|119|
+|getresgid                     |common|120|
+|getpgid                       |common|121|
+|setfsuid                      |common|122|
+|setfsgid                      |common|123|
+|getsid                        |common|124|
+|capget                        |common|125|
+|capset                        |common|126|
+|rt_sigpending                 |64    |127|
+|rt_sigtimedwait               |64    |128|
+|rt_sigqueueinfo               |64    |129|
+|rt_sigsuspend                 |common|130|
+|sigaltstack                   |64    |131|
+|utime                         |common|132|
+|mknod                         |common|133|
+|uselib                        |64    |134|
+|personality                   |common|135|
+|ustat                         |common|136|
+|statfs                        |common|137|
+|fstatfs                       |common|138|
+|sysfs                         |common|139|
+|getpriority                   |common|140|
+|setpriority                   |common|141|
+|sched_setparam                |common|142|
+|sched_getparam                |common|143|
+|sched_setscheduler            |common|144|
+|sched_getscheduler            |common|145|
+|sched_get_priority_max        |common|146|
+|sched_get_priority_min        |common|147|
+|sched_rr_get_interval         |common|148|
+|mlock                         |common|149|
+|munlock                       |common|150|
+|mlockall                      |common|151|
+|munlockall                    |common|152|
+|vhangup                       |common|153|
+|modify_ldt                    |common|154|
+|pivot_root                    |common|155|
+|_sysctl                       |64    |156|
+|prctl                         |common|157|
+|arch_prctl                    |common|158|
+|adjtimex                      |common|159|
+|setrlimit                     |common|160|
+|chroot                        |common|161|
+|sync                          |common|162|
+|acct                          |common|163|
+|settimeofday                  |common|164|
+|mount                         |common|165|
+|umount2                       |common|166|
+|swapon                        |common|167|
+|swapoff                       |common|168|
+|reboot                        |common|169|
+|sethostname                   |common|170|
+|setdomainname                 |common|171|
+|iopl                          |common|172|
+|ioperm                        |common|173|
+|create_module                 |64    |174|
+|init_module                   |common|175|
+|delete_module                 |common|176|
+|get_kernel_syms               |64    |177|
+|query_module                  |64    |178|
+|quotactl                      |common|179|
+|nfsservctl                    |64    |180|
+|getpmsg                       |common|181|
+|putpmsg                       |common|182|
+|afs_syscall                   |common|183|
+|tuxcall                       |common|184|
+|security                      |common|185|
+|gettid                        |common|186|
+|readahead                     |common|187|
+|setxattr                      |common|188|
+|lsetxattr                     |common|189|
+|fsetxattr                     |common|190|
+|getxattr                      |common|191|
+|lgetxattr                     |common|192|
+|fgetxattr                     |common|193|
+|listxattr                     |common|194|
+|llistxattr                    |common|195|
+|flistxattr                    |common|196|
+|removexattr                   |common|197|
+|lremovexattr                  |common|198|
+|fremovexattr                  |common|199|
+|tkill                         |common|200|
+|time                          |common|201|
+|futex                         |common|202|
+|sched_setaffinity             |common|203|
+|sched_getaffinity             |common|204|
+|set_thread_area               |64    |205|
+|io_setup                      |64    |206|
+|io_destroy                    |common|207|
+|io_getevents                  |common|208|
+|io_submit                     |64    |209|
+|io_cancel                     |common|210|
+|get_thread_area               |64    |211|
+|lookup_dcookie                |common|212|
+|epoll_create                  |common|213|
+|epoll_ctl_old                 |64    |214|
+|epoll_wait_old                |64    |215|
+|remap_file_pages              |common|216|
+|getdents64                    |common|217|
+|set_tid_address               |common|218|
+|restart_syscall               |common|219|
+|semtimedop                    |common|220|
+|fadvise64                     |common|221|
+|timer_create                  |64    |222|
+|timer_settime                 |common|223|
+|timer_gettime                 |common|224|
+|timer_getoverrun              |common|225|
+|timer_delete                  |common|226|
+|clock_settime                 |common|227|
+|clock_gettime                 |common|228|
+|clock_getres                  |common|229|
+|clock_nanosleep               |common|230|
+|exit_group                    |common|231|
+|epoll_wait                    |common|232|
+|epoll_ctl                     |common|233|
+|tgkill                        |common|234|
+|utimes                        |common|235|
+|vserver                       |64    |236|
+|mbind                         |common|237|
+|set_mempolicy                 |common|238|
+|get_mempolicy                 |common|239|
+|mq_open                       |common|240|
+|mq_unlink                     |common|241|
+|mq_timedsend                  |common|242|
+|mq_timedreceive               |common|243|
+|mq_notify                     |64    |244|
+|mq_getsetattr                 |common|245|
+|kexec_load                    |64    |246|
+|waitid                        |64    |247|
+|add_key                       |common|248|
+|request_key                   |common|249|
+|keyctl                        |common|250|
+|ioprio_set                    |common|251|
+|ioprio_get                    |common|252|
+|inotify_init                  |common|253|
+|inotify_add_watch             |common|254|
+|inotify_rm_watch              |common|255|
+|migrate_pages                 |common|256|
+|openat                        |common|257|
+|mkdirat                       |common|258|
+|mknodat                       |common|259|
+|fchownat                      |common|260|
+|futimesat                     |common|261|
+|newfstatat                    |common|262|
+|unlinkat                      |common|263|
+|renameat                      |common|264|
+|linkat                        |common|265|
+|symlinkat                     |common|266|
+|readlinkat                    |common|267|
+|fchmodat                      |common|268|
+|faccessat                     |common|269|
+|pselect6                      |common|270|
+|ppoll                         |common|271|
+|unshare                       |common|272|
+|set_robust_list               |64    |273|
+|get_robust_list               |64    |274|
+|splice                        |common|275|
+|tee                           |common|276|
+|sync_file_range               |common|277|
+|vmsplice                      |64    |278|
+|move_pages                    |64    |279|
+|utimensat                     |common|280|
+|epoll_pwait                   |common|281|
+|signalfd                      |common|282|
+|timerfd_create                |common|283|
+|eventfd                       |common|284|
+|fallocate                     |common|285|
+|timerfd_settime               |common|286|
+|timerfd_gettime               |common|287|
+|accept4                       |common|288|
+|signalfd4                     |common|289|
+|eventfd2                      |common|290|
+|epoll_create1                 |common|291|
+|dup3                          |common|292|
+|pipe2                         |common|293|
+|inotify_init1                 |common|294|
+|preadv                        |64    |295|
+|pwritev                       |64    |296|
+|rt_tgsigqueueinfo             |64    |297|
+|perf_event_open               |common|298|
+|recvmmsg                      |64    |299|
+|fanotify_init                 |common|300|
+|fanotify_mark                 |common|301|
+|prlimit64                     |common|302|
+|name_to_handle_at             |common|303|
+|open_by_handle_at             |common|304|
+|clock_adjtime                 |common|305|
+|syncfs                        |common|306|
+|sendmmsg                      |64    |307|
+|setns                         |common|308|
+|getcpu                        |common|309|
+|process_vm_readv              |64    |310|
+|process_vm_writev             |64    |311|
+|kcmp                          |common|312|
+|finit_module                  |common|313|
+|sched_setattr                 |common|314|
+|sched_getattr                 |common|315|
+|renameat2                     |common|316|
+|seccomp                       |common|317|
+|getrandom                     |common|318|
+|memfd_create                  |common|319|
+|kexec_file_load               |common|320|
+|bpf                           |common|321|
+|execveat                      |64    |322|
+|userfaultfd                   |common|323|
+|membarrier                    |common|324|
+|mlock2                        |common|325|
+|copy_file_range               |common|326|
+|preadv2                       |64    |327|
+|pwritev2                      |64    |328|
+|pkey_mprotect                 |common|329|
+|pkey_alloc                    |common|330|
+|pkey_free                     |common|331|
+|statx                         |common|332|
+|io_pgetevents                 |common|333|
+|rseq                          |common|334|
+|pidfd_send_signal             |common|424|
+|io_uring_setup                |common|425|
+|io_uring_enter                |common|426|
+|io_uring_register             |common|427|
+|open_tree                     |common|428|
+|move_mount                    |common|429|
+|fsopen                        |common|430|
+|fsconfig                      |common|431|
+|fsmount                       |common|432|
+|fspick                        |common|433|
+|pidfd_open                    |common|434|
+|clone3                        |common|435|
+|close_range                   |common|436|
+|openat2                       |common|437|
+|pidfd_getfd                   |common|438|
+|faccessat2                    |common|439|
+|process_madvise               |common|440|
+|epoll_pwait2                  |common|441|
+|mount_setattr                 |common|442|
+|quotactl_fd                   |common|443|
+|landlock_create_ruleset       |common|444|
+|landlock_add_rule             |common|445|
+|landlock_restrict_self        |common|446|
+|memfd_secret                  |common|447|
+|process_mrelease              |common|448|
+|futex_waitv                   |common|449|
+|set_mempolicy_home_node       |common|450|
+|rt_sigaction                  |x32   |512|
+|rt_sigreturn                  |x32   |513|
+|ioctl                         |x32   |514|
+|readv                         |x32   |515|
+|writev                        |x32   |516|
+|recvfrom                      |x32   |517|
+|sendmsg                       |x32   |518|
+|recvmsg                       |x32   |519|
+|execve                        |x32   |520|
+|ptrace                        |x32   |521|
+|rt_sigpending                 |x32   |522|
+|rt_sigtimedwait               |x32   |523|
+|rt_sigqueueinfo               |x32   |524|
+|sigaltstack                   |x32   |525|
+|timer_create                  |x32   |526|
+|mq_notify                     |x32   |527|
+|kexec_load                    |x32   |528|
+|waitid                        |x32   |529|
+|set_robust_list               |x32   |530|
+|get_robust_list               |x32   |531|
+|vmsplice                      |x32   |532|
+|move_pages                    |x32   |533|
+|preadv                        |x32   |534|
+|pwritev                       |x32   |535|
+|rt_tgsigqueueinfo             |x32   |536|
+|recvmmsg                      |x32   |537|
+|sendmmsg                      |x32   |538|
+|process_vm_readv              |x32   |539|
+|process_vm_writev             |x32   |540|
+|setsockopt                    |x32   |541|
+|getsockopt                    |x32   |542|
+|io_setup                      |x32   |543|
+|io_submit                     |x32   |544|
+|execveat                      |x32   |545|
+|preadv2                       |x32   |546|
+|pwritev2                      |x32   |547|
+
+#### 模板姿势
+
 ```c
 #define _GNU_SOURCE
 #include <errno.h>
@@ -871,6 +1278,7 @@ add-symbol-file driver/vuln.ko $driver_base
 #include <sys/types.h>
 #include <unistd.h>
 
+
 /* Global variables
  * 定义使用到的全局变量
  * 使用 gXXX 统一命名，避免与局部变量命名冲突
@@ -888,7 +1296,6 @@ struct list_head {
 };
 
 
-
 /* Macros
  * 定义辅助宏
  */
@@ -904,7 +1311,12 @@ struct list_head {
     } \
 }
 #define offsetof(TYPE, MEMBER) \
-    ((size_t) &((TYPE*)0)->MEMBER) \
+    ((size_t) &((TYPE*)0)->MEMBER)
+#define __X32_SYSCALL_BIT   0x40000000
+#define syscall_x32(nr, args...) \
+    syscall((nr) + __X32_SYSCALL_BIT, ##args)
+#define syscall_x64(nr, args...) \
+    syscall((nr), ##args)
 
 
 /* modprobe_path提权
