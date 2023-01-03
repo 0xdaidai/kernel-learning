@@ -815,7 +815,9 @@ KERNEL=$(pwd)/bzImage
 EXP=$(pwd)/exp.c
 
 # 静态编译exp
-gcc -o $(pwd)/rootfs/exp -Wall -Werror -static ${EXP}
+gcc -o $(pwd)/rootfs/exp.i -Werror -Wall -E ${EXP} \
+    && musl-gcc -o $(pwd)/rootfs/exp -Werror -Wall -static $(pwd)/rootfs/exp.i \
+    && rm -rf $(pwd)/rootfs/exp.i
 
 # 生成文件系统映像
 (cd ${ROOT}; find . | cpio -o --format=newc > ${ROOTFS})
@@ -1255,6 +1257,362 @@ add-symbol-file driver/vuln.ko $driver_base
 |execveat                      |x32   |545|
 |preadv2                       |x32   |546|
 |pwritev2                      |x32   |547|
+
+#### BPF姿势
+
+下面是一个BPF的模板
+```c
+#define _GNU_SOURCE
+#include <linux/bpf.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/syscall.h> 
+#include <unistd.h>
+
+#define assert(cond) \
+{ \
+    if(!(cond)) \
+    { \
+        printf("Line:%d: '%s' assertion failed\n", \
+               __LINE__, #cond); \
+        perror(#cond); \
+        fflush(stdout); \
+        exit(EXIT_FAILURE); \
+    } \
+}
+
+/* ebpf用户态helper宏和函数
+ * 
+ * 参数:
+ *      1. @cmd，表明bpf()执行的操作
+ *      2. @attr，表明此次执行的操作的参数
+ *      3. @size，即@attr union结构体的大小
+ */
+int bpf(int cmd, union bpf_attr *attr,
+        unsigned int size)
+{
+    return syscall(SYS_bpf, cmd, attr, size);
+}
+/* bpf_create_map()创建一个新的map，并且返回该map对应的文件描述符
+ * 
+ * 参数:
+ *      1. @map_type：即该map的类型，可以通过man bpf，搜索
+ * bpf_map_type \{关键词查看
+ *      2. @key_size: 即map的key元素的字节数
+ *      3. @value_size: 即map的value元素的字节数
+ *      4. @max_entries: 这个map所允许的最大映射数
+ *
+ * 返回值：
+ *      @ret：返回相应的文件描述符
+ */
+int bpf_create_map(enum bpf_map_type map_type,
+                   unsigned int key_size,
+                   unsigned int value_size,
+                   unsigned int max_entries)
+{
+    union bpf_attr attr = {
+        .map_type    = map_type,
+        .key_size    = key_size,
+        .value_size  = value_size,
+        .max_entries = max_entries
+    };
+
+    return bpf(BPF_MAP_CREATE, &attr, sizeof(attr));
+}
+/* bpf_lookup_elem()在fd对应的map中，查找key元素为@key的映射
+ * 的value值，并将映射的value值赋给@value
+ *
+ * 参数
+ *      1. @fd: 要查找的map对应的文件描述符
+ *      2. @key: 映射key元素的地址
+ *      3. @value：映射value元素的buf地址
+ *
+ * 返回值：
+ *      @ret：成功找到元素，则返回@value元素的字节数
+ */
+int bpf_lookup_elem(int fd, const void *key, void *value)
+{
+    union bpf_attr attr = {
+        .map_fd = fd,
+        .key    = (__aligned_u64)key,
+        .value  = (__aligned_u64)value,
+    };
+
+    return bpf(BPF_MAP_LOOKUP_ELEM, &attr, sizeof(attr));
+}
+/* bpf_update_elem()在fd对应的map中，创建/更新映射对
+ *
+ * 参数
+ *      1. @fd: 要查找的map对应的文件描述符
+ *      2. @key: 映射key元素的地址
+ *      3. @value：映射value元素的buf地址
+ *      4. @flags:用来设置此次操作的类型
+ * BPF_NOEXIST，表示仅仅在@key不存在时创建映射；
+ * BPF_EXIST，表示仅仅在@key存在是更新映射;
+ * BPF_ANY,表示如果存在，则更新，否则创建即可
+ *
+ * 返回值：
+ *      @ret:成功更新或添加则返回0
+ */
+int bpf_update_elem(int fd, const void *key,
+                    const void *value,
+                    uint64_t flags)
+{
+    union bpf_attr attr = {
+        .map_fd = fd,
+        .key    = (__aligned_u64)key,
+        .value  = (__aligned_u64)value,
+        .flags  = flags,
+    };
+
+    return bpf(BPF_MAP_UPDATE_ELEM, &attr, sizeof(attr));
+}
+/* bpf_delete_elem()在fd对应的map中，查找key元素为@key的映射
+ * 并删除
+ *
+ * 参数
+ *      1. @fd: 要查找的map对应的文件描述符
+ *      2. @key: 映射key元素的地址
+ *
+ * 返回值
+ *      @ret: 成功找到并删除返回0
+ */
+int bpf_delete_elem(int fd, const void *key)
+{
+    union bpf_attr attr = {
+        .map_fd = fd,
+        .key    = (__aligned_u64)key,
+    };
+
+    return bpf(BPF_MAP_DELETE_ELEM, &attr, sizeof(attr));
+}
+/* bpf_prog_load将ebpf程序载入内核中执行，并返回相关的文件描述符
+ * 
+ * 参数:
+ *      1. @type：即bpf程序的类型，可以通过man bpf，搜索
+ * bpf_prog_type \{关键词查看
+ *      2. @insns: 即struct bpf_insn数组，一组指令组成一个
+ * bpf数组
+ *      3. @insn_cnt:即@insns数组的元素个数
+ *
+ * 返回值：
+ *      @ret: ebpf程序关联的文件描述符
+ */
+int bpf_prog_load(enum bpf_prog_type type,
+                  const struct bpf_insn *insns,
+                  int insn_cnt)
+{
+    int bpf_log_size = 0x1000, ret;
+    char *bpf_log;
+
+    assert((bpf_log = malloc(bpf_log_size)) != NULL);
+
+    union bpf_attr attr = {
+        .prog_type      = type,
+        .insns          = (__aligned_u64)insns,
+        .insn_cnt       = insn_cnt,
+        .license        = (__aligned_u64)"GPL",
+        .log_buf        = (__aligned_u64)bpf_log,
+        .log_size       = bpf_log_size,
+        .log_level      = 2,
+    };
+
+    ret = bpf(BPF_PROG_LOAD, &attr, sizeof(attr));
+    printf("[bpf]\n%s\n", bpf_log);
+    fflush(stdout);
+    free(bpf_log);
+
+    assert(ret > 0);
+    return ret;
+}
+#define bpf_prog_load(type, insns)    \
+        bpf_prog_load((type), (insns), \
+                      sizeof((insns)) / sizeof((insns)[0]))
+/* struct bpf_insn的wrapper宏,
+ * 参考自内核源代码中的kernel/samples/bpf/bpf_insn.h
+ * 其余相关的宏参考/usr/include/linux/bpf_common.h
+ *
+ * ebpf的指令集信息可参考
+ * https://docs.kernel.org/bpf/instruction-set.html
+ *
+ * R0: return value from function calls, and exit value for eBPF programs
+ * R1 - R5: arguments for function calls
+ * R6 - R9: callee saved registers that function calls will preserve
+ * R10: read-only frame pointer to access stack
+
+ */
+#define BPF_RAW_INSN(CODE, DST, SRC, OFF, IMM)  \
+  ((struct bpf_insn) {                          \
+    .code     = CODE,                           \
+    .dst_reg  = DST,                            \
+    .src_reg  = SRC,                            \
+    .off      = OFF,                            \
+    .imm      = IMM })
+/* dst_reg OP= src_reg,
+ *
+ * OP包括如下候选
+ * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
+ * BPF_OR   BPF_AND BPF_LSH BPF_RSH
+ * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ *
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_ALU64_REG(OP, DST, SRC)             \
+  BPF_RAW_INSN(BPF_ALU64 | BPF_OP(OP) | BPF_X,  \
+               DST, SRC, 0, 0)
+#define BPF_ALU32_REG(OP, DST, SRC)             \
+  BPF_RAW_INSN(BPF_ALU | BPF_OP(OP) | BPF_X,  \
+               DST, SRC, 0, 0)
+/* dst_reg OP= imm32,
+ * OP包括如下候选
+ * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
+ * BPF_OR   BPF_AND BPF_LSH BPF_RSH
+ * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ *
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_ALU64_IMM32(OP, DST, IMM)           \
+  BPF_RAW_INSN(BPF_ALU64 | BPF_OP(OP) | BPF_K,  \
+               DST, 0, 0, (IMM))
+#define BPF_ALU32_IMM32(OP, DST, IMM)             \
+  BPF_RAW_INSN(BPF_ALU | BPF_OP(OP) | BPF_K,  \
+               DST, 0, 0, (IMM))
+/* *(dst_reg + off16) = imm32
+ * SIZE包括如下候选
+ * BPF_B(8-bit)   BPF_H(16-bit)
+ * BPF_W(32-bit)  BPF_DW(64-bit)
+ *
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_ST_MEM(SIZE, DST, OFF, IMM)   \
+  BPF_RAW_INSN(BPF_ST | BPF_SIZE(SIZE) | BPF_MEM,   \
+               DST, 0, OFF, IMM)
+/* *(dst_reg + off16) = src_reg
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_STX_MEM(SIZE, DST, SRC, OFF)   \
+  BPF_RAW_INSN(BPF_STX | BPF_SIZE(SIZE) | BPF_MEM,   \
+               DST, SRC, OFF, 0)
+/* dst_reg = *(src_reg + off16)
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_LDX_MEM(SIZE, DST, SRC, OFF)   \
+  BPF_RAW_INSN(BPF_LDX | BPF_SIZE(SIZE) | BPF_MEM,   \
+               DST, SRC, OFF, 0)
+/* dst_reg = *(imm64)
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_LD_IMM64(DST, IMM)  \
+  BPF_RAW_INSN(BPF_LD | BPF_DW | BPF_IMM,     \
+               DST, 0, 0, (__u32)(IMM)),      \
+  BPF_RAW_INSN(0, 0, 0, 0, ((__64)(IMM)) >> 32)
+/* if (dst_reg OP src_reg) goto pc + off16
+ * OP包括如下候选
+ * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
+ * BPF_OR   BPF_AND BPF_LSH BPF_RSH
+ * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ *
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_JMP_REG(OP, DST, SRC, OFF)  \
+  BPF_RAW_INSN(BPF_JMP | BPF_OP(OP) | BPF_X,  \
+               DST, SRC, OFF, 0)
+#define BPF_JMP32_REG(OP, DST, SRC, OFF)  \
+  BPF_RAW_INSN(BPF_JMP32 | BPF_OP(OP) | BPF_X,  \
+               DST, SRC, OFF, 0)
+/* if (dst_reg OP imm32) goto pc + off16
+ * OP包括如下候选
+ * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
+ * BPF_OR   BPF_AND BPF_LSH BPF_RSH
+ * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ *
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_JMP_IMM32(OP, DST, IMM, OFF)  \
+  BPF_RAW_INSN(BPF_JMP | BPF_OP(OP) | BPF_K,  \
+               DST, 0, OFF, IMM)
+#define BPF_JMP32_IMM32(OP, DST, IMM, OFF)  \
+  BPF_RAW_INSN(BPF_JMP32 | BPF_OP(OP) | BPF_K,  \
+               DST, 0, OFF, IMM)
+#define BPF_EXIT_INSN() \
+  BPF_RAW_INSN(BPF_JMP | BPF_EXIT, 0, 0, 0, 0)
+/* if (!(dst_reg OP src_reg)) exit
+ * OP包括如下候选
+ * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
+ * BPF_OR   BPF_AND BPF_LSH BPF_RSH
+ * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ *
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_ASSERT_REG(OP, DST, SRC) \
+  BPF_RAW_INSN(BPF_JMP | BPF_OP(OP) | BPF_X,  \
+               DST, SRC, 1, 0), \
+  BPF_EXIT_INSN()
+/* if (!(dst_reg OP imm32)) exit
+ * OP包括如下候选
+ * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
+ * BPF_OR   BPF_AND BPF_LSH BPF_RSH
+ * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ *
+ * REG包括如下候选
+ * BPF_REG_0  BPF_REG_1  BPF_REG_2
+ * BPF_REG_3  BPF_REG_4  BPF_REG_5
+ * BPF_REG_6  BPF_REG_7  BPF_REG_8
+ * BPF_REG_9  BPF_REG_10
+ */
+#define BPF_ASSERT_IMM32(OP, DST, IMM) \
+  BPF_RAW_INSN(BPF_JMP | BPF_OP(OP) | BPF_K,  \
+               DST, 0, 1, IMM), \
+  BPF_EXIT_INSN()
+
+
+int main(void) {
+
+  struct bpf_insn insns[] = {
+    BPF_EXIT_INSN(),
+  };
+
+  close(bpf_prog_load(BPF_PROG_TYPE_SOCKET_FILTER, insns));
+  return 0;
+}
+```
 
 #### 模板姿势
 
