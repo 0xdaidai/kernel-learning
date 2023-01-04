@@ -1267,8 +1267,11 @@ add-symbol-file driver/vuln.ko $driver_base
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/socket.h>
 #include <sys/syscall.h> 
+#include <sys/types.h>
 #include <unistd.h>
+
 
 #define assert(cond) \
 { \
@@ -1452,9 +1455,11 @@ int bpf_prog_load(enum bpf_prog_type type,
 /* dst_reg OP= src_reg,
  *
  * OP包括如下候选
- * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
- * BPF_OR   BPF_AND BPF_LSH BPF_RSH
- * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ * BPF_ADD(+)   BPF_SUB(-)  BPF_MUL(*)
+ * BPF_DIV(/)   BPF_OR(|)   BPF_AND(&)
+ * BPF_LSH(<<)  BPF_RSH(>>) BPF_NEG(~)
+ * BPF_MOD(%)   BPF_XOR(^)  BPF_MOV(=)
+ * ...，参考https://docs.kernel.org/bpf/instruction-set.html
  *
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
@@ -1470,9 +1475,11 @@ int bpf_prog_load(enum bpf_prog_type type,
                DST, SRC, 0, 0)
 /* dst_reg OP= imm32,
  * OP包括如下候选
- * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
- * BPF_OR   BPF_AND BPF_LSH BPF_RSH
- * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ * BPF_ADD(+)   BPF_SUB(-)  BPF_MUL(*)
+ * BPF_DIV(/)   BPF_OR(|)   BPF_AND(&)
+ * BPF_LSH(<<)  BPF_RSH(>>) BPF_NEG(~)
+ * BPF_MOD(%)   BPF_XOR(^)  BPF_MOV(=)
+ * ...，参考https://docs.kernel.org/bpf/instruction-set.html
  *
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
@@ -1501,6 +1508,10 @@ int bpf_prog_load(enum bpf_prog_type type,
   BPF_RAW_INSN(BPF_ST | BPF_SIZE(SIZE) | BPF_MEM,   \
                DST, 0, OFF, IMM)
 /* *(dst_reg + off16) = src_reg
+ * SIZE包括如下候选
+ * BPF_B(8-bit)   BPF_H(16-bit)
+ * BPF_W(32-bit)  BPF_DW(64-bit)
+ * 
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
  * BPF_REG_3  BPF_REG_4  BPF_REG_5
@@ -1511,6 +1522,10 @@ int bpf_prog_load(enum bpf_prog_type type,
   BPF_RAW_INSN(BPF_STX | BPF_SIZE(SIZE) | BPF_MEM,   \
                DST, SRC, OFF, 0)
 /* dst_reg = *(src_reg + off16)
+ * SIZE包括如下候选
+ * BPF_B(8-bit)   BPF_H(16-bit)
+ * BPF_W(32-bit)  BPF_DW(64-bit)
+ * 
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
  * BPF_REG_3  BPF_REG_4  BPF_REG_5
@@ -1521,6 +1536,10 @@ int bpf_prog_load(enum bpf_prog_type type,
   BPF_RAW_INSN(BPF_LDX | BPF_SIZE(SIZE) | BPF_MEM,   \
                DST, SRC, OFF, 0)
 /* dst_reg = *(imm64)
+ * SIZE包括如下候选
+ * BPF_B(8-bit)   BPF_H(16-bit)
+ * BPF_W(32-bit)  BPF_DW(64-bit)
+ * 
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
  * BPF_REG_3  BPF_REG_4  BPF_REG_5
@@ -1533,9 +1552,11 @@ int bpf_prog_load(enum bpf_prog_type type,
   BPF_RAW_INSN(0, 0, 0, 0, ((__64)(IMM)) >> 32)
 /* if (dst_reg OP src_reg) goto pc + off16
  * OP包括如下候选
- * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
- * BPF_OR   BPF_AND BPF_LSH BPF_RSH
- * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ * BPF_JEQ(==)          BPF_JGT(unsigned <)
+ * BPF_JGE(unsigned >=) BPF_JNE(!=)
+ * BPF_JLT(unsigned <)  BPF_JLE(unsigned <=)
+ * BPF_CALL             BPF_EXIT
+ * ...，参考https://docs.kernel.org/bpf/instruction-set.html
  *
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
@@ -1551,9 +1572,12 @@ int bpf_prog_load(enum bpf_prog_type type,
                DST, SRC, OFF, 0)
 /* if (dst_reg OP imm32) goto pc + off16
  * OP包括如下候选
- * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
- * BPF_OR   BPF_AND BPF_LSH BPF_RSH
- * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ * BPF_JEQ(==)          BPF_JGT(unsigned <)
+ * BPF_JGE(unsigned >=) BPF_JNE(!=)
+ * BPF_JLT(unsigned <)  BPF_JLE(unsigned <=)
+ * BPF_CALL(参考man bpf-helpers，调用)
+ * BPF_EXIT
+ * ...，参考https://docs.kernel.org/bpf/instruction-set.html
  *
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
@@ -1567,13 +1591,14 @@ int bpf_prog_load(enum bpf_prog_type type,
 #define BPF_JMP32_IMM32(OP, DST, IMM, OFF)  \
   BPF_RAW_INSN(BPF_JMP32 | BPF_OP(OP) | BPF_K,  \
                DST, 0, OFF, IMM)
-#define BPF_EXIT_INSN() \
-  BPF_RAW_INSN(BPF_JMP | BPF_EXIT, 0, 0, 0, 0)
 /* if (!(dst_reg OP src_reg)) exit
  * OP包括如下候选
- * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
- * BPF_OR   BPF_AND BPF_LSH BPF_RSH
- * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ * BPF_JEQ(==)          BPF_JGT(unsigned <)
+ * BPF_JGE(unsigned >=) BPF_JNE(!=)
+ * BPF_JLT(unsigned <)  BPF_JLE(unsigned <=)
+ * BPF_CALL(参考man bpf-helpers，调用)
+ * BPF_EXIT
+ * ...，参考https://docs.kernel.org/bpf/instruction-set.html
  *
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
@@ -1581,15 +1606,20 @@ int bpf_prog_load(enum bpf_prog_type type,
  * BPF_REG_6  BPF_REG_7  BPF_REG_8
  * BPF_REG_9  BPF_REG_10
  */
+#define BPF_EXIT_INSN()  \
+  BPF_RAW_INSN(BPF_JMP | BPF_EXIT, 0, 0, 0, 0)
 #define BPF_ASSERT_REG(OP, DST, SRC) \
   BPF_RAW_INSN(BPF_JMP | BPF_OP(OP) | BPF_X,  \
                DST, SRC, 1, 0), \
   BPF_EXIT_INSN()
 /* if (!(dst_reg OP imm32)) exit
  * OP包括如下候选
- * BPF_ADD  BPF_SUB BPF_MUL BPF_DIV
- * BPF_OR   BPF_AND BPF_LSH BPF_RSH
- * BPF_NEG  BPF_MOD BPF_XOR BPF_MOV
+ * BPF_JEQ(==)          BPF_JGT(unsigned <)
+ * BPF_JGE(unsigned >=) BPF_JNE(!=)
+ * BPF_JLT(unsigned <)  BPF_JLE(unsigned <=)
+ * BPF_CALL(参考man bpf-helpers，调用)
+ * BPF_EXIT
+ * ...，参考https://docs.kernel.org/bpf/instruction-set.html
  *
  * REG包括如下候选
  * BPF_REG_0  BPF_REG_1  BPF_REG_2
@@ -1601,15 +1631,47 @@ int bpf_prog_load(enum bpf_prog_type type,
   BPF_RAW_INSN(BPF_JMP | BPF_OP(OP) | BPF_K,  \
                DST, 0, 1, IMM), \
   BPF_EXIT_INSN()
+/* bpf_prog_load()将bpf程序装载入内核中，然后trigger_bpf()
+ * 会将对应的bpf程序关联到对应事件的hook点，并产生相关事件，来
+ * 触发执行对应的bpf程序
+ *
+ * 参数:
+ *    1. @progfd:即bpf_prog_load()返回的关联bpf程序的文件描述符
+ */
+void trigger_bpf(int progfd)
+{
+  int sockets[2];
+  char buf[0x80] = {0};
+
+  // 将bpf程序关联到该socket的PACKET FILTER事件
+  assert(socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets) == 0);
+  assert(setsockopt(sockets[0], SOL_SOCKET, SO_ATTACH_BPF, &progfd, sizeof(progfd)) == 0);
+
+  // 向socket中写数据，从而触发PACKET FILTER事件，执行关联的bpf程序
+  assert(write(sockets[1], buf, sizeof(buf)) == sizeof(buf));
+}
 
 
 int main(void) {
 
+  int progfd;
+
   struct bpf_insn insns[] = {
-    BPF_EXIT_INSN(),
+    BPF_ALU64_IMM32(BPF_MOV, BPF_REG_0, 0x1737),    /* r0 = 0x1737 */
+    BPF_ASSERT_IMM32(BPF_JEQ, BPF_REG_0, 0x1737),   /* assert(r0 = 0x1737) */
+    BPF_ALU64_REG(BPF_MOV, BPF_REG_2, BPF_REG_0),   /* r2 = r0 */
+    BPF_ASSERT_IMM32(BPF_JEQ, BPF_REG_2, 0x1737),   /* assert(r2 = 0x1737) */
+    BPF_STX_MEM(BPF_DW, BPF_REG_10, BPF_REG_2, -0x8), /* *(uint64_t*)(r10 - 0x8) = r2 */
+    BPF_LDX_MEM(BPF_B, BPF_REG_9, BPF_REG_10, -0x8), /* r9 = *(uint8_t*)(r10 - 0x8) */
+    BPF_ASSERT_IMM32(BPF_JEQ, BPF_REG_9, 0x37),     /* assert(r9 = 0x37) */
+    BPF_EXIT_INSN(),                                /* exit */
   };
 
-  close(bpf_prog_load(BPF_PROG_TYPE_SOCKET_FILTER, insns));
+  progfd = bpf_prog_load(BPF_PROG_TYPE_SOCKET_FILTER, insns);
+
+  /* 创建一个socket，并发送数据包，从而触发bpf */
+  trigger_bpf(progfd);
+
   return 0;
 }
 ```
