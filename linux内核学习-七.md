@@ -19,7 +19,7 @@ categories: ['内核']
 3. 用保存在内核栈中的值加载寄存器，CPU从内核态切换回到用户态
 
 其具体关系如下图所示
-![系统调用示意图](系统调用示意图.png)
+![系统调用示意图](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/系统调用示意图.png)
 
 正如前面分析的，Linux内核处理系统调用的机制和处理中断和异常的机制十分相似——其将**系统调用号**和**系统调用服务例程**，以数组的形式进行管理。从而根据相关的系统调用号，可以方便的找到对应的**handler**
 
@@ -59,7 +59,7 @@ __x64_sys_$name
 
 ## 进入系统调用
 根据[intel手册](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html)的1871页，其详细描述了64位的**syscall**指令，如下图所示
-![syscall指令](syscall指令.png)
+![syscall指令](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/syscall指令.png)
 
 在**syscall**指令中，硬件会执行一系列相关的操作，从而跳转到系统调用处理进程的入口，会涉及到**模块集寄存器**，其在[arch/x86/kernel/cpu/common.c](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/kernel/cpu/common.c#L1802)的**void syscall_init(void)**函数中进行初始化。**syscall**指令将**MSR_STAR**的`47:32`值作为**CS**和**SS**段选择寄存器的值，将**MSR_LSTAR**的值作为**rip**寄存器的值。其将**返回地址**保存在**rcx**寄存器中，**rflags**状态保存在**r11**寄存器中，然后执行位于[arch/x86/entry/entry_64.S](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/entry/entry_64.S#L87)的**entry_SYSCALL_64**函数。其化简后的逻辑如下所示
 
@@ -94,7 +94,7 @@ SYM_INNER_LABEL(entry_SYSCALL_64_after_hwframe, SYM_L_GLOBAL)
 
 其中，**SWITCH_TO_KERNEL_CR3**、**PUSH_AND_CLEAR_REGS**等符号位于[arch/x86/entry/calling.h](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/entry/calling.h)中
 其基本思路就是构造**struct pt_regs**结构体，并作为相关参数传递给**do_syscall_64**函数即可。最终**struct pt_regs**结构体内容如下所示
-![内核态栈布局](内核态栈布局.png)
+![内核态栈布局](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/内核态栈布局.png)
 
 ## 执行系统调用服务例程
 
@@ -215,7 +215,7 @@ syscall_return_via_sysret:
 其大体思路就是进行一系列的检查，恢复关键的通用寄存器，然后执行**rsp**寄存器，最后调用**sysretq**指令(忽略错误处理和栈切换等介绍)。
 
 根据[intel手册](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html)的1880页，其详细描述了64位的**sysret**指令，如下图所示
-![syscall指令](syscall指令.png)
+![syscall指令](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/syscall指令.png)
 
 **sysret**指令将**MSR_STAR**的`63:48`值作为**CS**和**SS**段选择寄存器的值，从**rcx**恢复**rip**寄存器的值，从**r11**恢复**rflags**寄存器。
 

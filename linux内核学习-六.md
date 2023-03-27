@@ -38,7 +38,7 @@ PIC会执行如下动作
 
 ### I/O APIC
 I/O APIC硬件的基本结构如下图所示
-![I/O APIC硬件结构](apic结构.png)
+![I/O APIC硬件结构](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/apic结构.png)
 
 每个CPU都含有一个本地APIC，而每个本地APIC都有32位的寄存器、一个内部时钟、一个本地定时设备及为本地APIC中断保留的两条额外的IRQ线**LINT0**和**LINT1**。所有的本地APIC都连接到一个外部的I/O APIC，形成一个多APIC的系统
 
@@ -53,7 +53,7 @@ I/O APIC硬件的基本结构如下图所示
 中段描述符表(Interrupt Descriptor Table, IDT)，其与每一个中断或异常向量相联系，每一个向量在表中有相应的中断或异常处理程序的入口地址
 **idtr寄存器**存储IDT的线性基地址以及其限制，类似于前面介绍的**gdt**
 IDT包含三种类型的描述符，每种描述符的64位含义如下图所示
-![idt结构](idt.png)
+![idt结构](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/idt.png)
 
 各个类型的中段描述符的含义如下
 1. 任务门
@@ -90,7 +90,7 @@ IDT包含三种类型的描述符，每种描述符的64位含义如下图所示
 ## 中断和异常处理程序的嵌套执行
 
 内核态的执行序列可以进行任意嵌套——即一个中断处理程序可以被另一个中断处理程序"中断"，如下图所示
-![内核执行序列嵌套](内核执行序列嵌套.png)
+![内核执行序列嵌套](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/内核执行序列嵌套.png)
 
 这里稍微说一下，允许内核执行序列嵌套的要求是中断处理程序运行期间，不发生进程切换——因为部分内核的中断处理程序使用独立的中断请求栈，其没有对应的进程，无法成功完成进程切换
 
@@ -145,7 +145,7 @@ asm_$name
 ### 为异常处理程序保存寄存器的值
 
 根据[intel手册](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html)的，在处理异常前，硬件会提前进行相关的处理，如下图所示
-![硬件处理部分](intel手册.png)
+![硬件处理部分](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/intel手册.png)
 
 在硬件自动执行完上述过程后，其会根据**异常向量**，从**idt**中找到已经设置好的**handler**。**idt**中设置的**handler**位于[arch/x86/kernel/idt.c](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/kernel/idt.c#L61)。可以看到，**handler**都是以**asm_**为前缀的符号，其通过[DECLARE_IDTENTRY宏](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/include/asm/idtentry.h#L427)声明在[arch/x86/include/asm/idtentry.h](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/include/asm/idtentry.h#L546)。而其最终包装的是位于[arch/x86/entry/entry_64.S](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/entry/entry_64.S#L350)的**idtentry**宏
 
@@ -192,7 +192,7 @@ asm_$name
 这里需要特别说明的是，Intel硬件切换的是位于TSS的**trampoline**堆栈，而非Linux进程的内核态堆栈，该栈是每个CPU上进程共享的。其通过**sync_regs**函数，切换到TSS中实际的进程的内核态堆栈
 
 最终的栈布局如下所示
-![异常处理的trampoline栈布局](异常处理的栈布局.png)
+![异常处理的trampoline栈布局](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/异常处理的栈布局.png)
 
 ### 进入和离开异常处理程序
 
@@ -242,7 +242,7 @@ else
 4. 跳转到**ret_from_intr**的地址，终止执行
 
 其I/O中断处理的示意图如下所示
-![I/O中断处理流程](IO中断处理流程.png)
+![I/O中断处理流程](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/IO中断处理流程.png)
 
 Intel将**32~238**范围的中断向量，保留给I/O中断。Linux内核使用[arch/x86/kernel/idt.c](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/kernel/idt.c#L267)的**void __init idt_setup_apic_and_irq_gates(void)**，来初始化相相关的**idt**。而这些I/O中断的**handler**，通过位于[arch/x86/include/asm/idtentry.h](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/include/asm/idtentry.h#L496)的**irq_entries_start**代码进行定义，其调用使用[DECLARE_IDTENTRY汇编宏](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/include/asm/idtentry.h#L443)声明在[arch/x86/include/asm/idtentry.h](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/include/asm/idtentry.h#L629)的函数。其执行[arch/x86/entry/entry_64.S](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/entry/entry_64.S#L388)函数，调用通过[DECLARE_IDTENTRY非汇编宏](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/include/asm/idtentry.h#L80)声明在[arch/x86/include/asm/idtentry.h](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/include/asm/idtentry.h#L629)的函数，实际上包装的是通过[DEFINE_IDTENTRY_IRQ宏](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/include/asm/idtentry.h#L189)定义在[arch/x86/kernel/irq.c](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/kernel/irq.c#L240)
 
@@ -259,7 +259,7 @@ Intel将**32~238**范围的中断向量，保留给I/O中断。Linux内核使用
 | unsigned int | depth | 描述IRQ线的嵌套深度 |
 
 所有的描述符在一起形成位于[kernel/irq/irqdesc.c](https://elixir.bootlin.com/linux/v5.17/source/kernel/irq/irqdesc.c#L552)的**irq_desc**数组，相关的关系如下所示
-![irq描述符](irq描述符.png)
+![irq描述符](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B8%83/irq描述符.png)
 
 
 #### struct irqaction

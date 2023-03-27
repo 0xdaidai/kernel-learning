@@ -12,7 +12,7 @@ categories: ['内核']
 # 虚拟文件系统
 
 Linux内核通过**虚拟文件系统**(Virtual Filesystem Switch)，从而可以健壮的为各种不同的文件系统提供一个通用的接口
-![虚拟文件系统总览](虚拟文件系统总览.png)
+![虚拟文件系统总览](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E5%9B%9B/虚拟文件系统总览.png)
 
 具体的，**VFS**将文件系统划分为三种类型
 - **磁盘文件系统**
@@ -32,7 +32,7 @@ Linux内核通过**虚拟文件系统**(Virtual Filesystem Switch)，从而可�
 - **文件对象**(file object)
 - **目标项对象**(dentry object)
 
-![VFS对象类型](VFS对象类型.png)
+![VFS对象类型](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E5%9B%9B/VFS对象类型.png)
 
 ## struct super_block
 

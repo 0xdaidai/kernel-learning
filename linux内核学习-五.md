@@ -32,13 +32,13 @@ Linux内核使用位于[include/linux/sched.h](https://elixir.bootlin.com/linux/
 
 
 其整体结构如下图所示
-![struct task_struct布局](task_struct.png)
+![struct task_struct布局](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%BA%94/task_struct.png)
 
 ## 内核栈
 
 若进程本身就是内核进程，或从用户态陷入内核态，此时其需要使用位于内核数据段的栈。
 在Linux中，进程对应的内核栈的内存布局如下所示
-![内核栈布局](内核栈.png)
+![内核栈布局](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%BA%94/内核栈.png)
 
 内核会将进程描述符的`thread_info`字段和`stack`字段对应的数据结构，共同分配在起始地址对齐$2^{13}$的，两个连续的页框上。
 这样子，可以通过计算$rsp \& 0xffffffffffffe000$，即可找到该进程对应的`thread_info`字段，从而获取进程描述符的地址
@@ -48,7 +48,7 @@ Linux内核使用位于[include/linux/sched.h](https://elixir.bootlin.com/linux/
 ## 进程链表
 
 Linux内核使用位于[scripts/kconfig/list.h](https://elixir.bootlin.com/linux/v5.17/source/scripts/kconfig/list.h#L24)的相关结构体，管理双向链表结构，如下图所示
-![list_head示意图](list_head.png)
+![list_head示意图](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%BA%94/list_head.png)
 
 Linux内核中提供了相关的宏来操作该双向链表结构，几个重要的处理函数如下所示
 
@@ -79,7 +79,7 @@ Linux内核使用进程描述符的`list_head`类型的`tasks`字段，将所有
 | sibling | 指向兄弟进程链表的其他元素，这些兄弟进程的父进程是相同的进程 |
 
 下面是进程$P0$创建了进程$P1$、$P2$、$P3$，而进程$P3$又创建了进程$P4$，其关系如下所示
-![进程关系](进程关系.png)
+![进程关系](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%BA%94/进程关系.png)
 
 
 ### 非亲属关系
@@ -178,7 +178,7 @@ Linux会为系统中每个CPU创建一个TSS，并在其上保存CPU运行的进
 总的来说，其基本思路就是保存需要保存的上下文，然后切换内核态堆栈，从而完成进程的切换。
 
 这里需要特别说明一下的是，注意到其并未保存**rdi**和**rsi**寄存器，这是有原因的。如下图所示
-![switch_to示意图](switch_to.png)
+![switch_to示意图](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%BA%94/switch_to.png)
 
 可以看到，如果进程A被暂停后在重新激活，其另一个相关进程往往是不一样的，如图中最左侧和最后侧的显示。
 最左侧是**switch_to(A, B)**，而最右侧是**switch_to(C, A)**。如果将**rdi**和**rsi**寄存器保存后再恢复，则重新激活后，其上下文是第一次冻结时的上下文，与实际情况大概率不相符。

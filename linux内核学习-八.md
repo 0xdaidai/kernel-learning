@@ -109,7 +109,7 @@ categories: ['内核']
 ## 与信号相关的数据结构
 
 Linux内核需要追踪当前什么信号正在挂起或被屏蔽，以及每个线程组是如何处理所有信号的。Linux内核中使用多个数据结构进行管理，其关系如下图所示
-![信号相关的数据结构关系](信号数据结构关系.png)
+![信号相关的数据结构关系](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E5%85%AB/信号数据结构关系.png)
 
 ### struct task_struct
 
@@ -485,8 +485,8 @@ out:
 
 由于可能需要执行**用户态**空间定义的信号handler，因此此过程涉及到频繁的**用户态**空间和**内核态**空间的转换，如下图所示
 
-![调用用户handler栈变换](调用用户handler栈变换.png)
-![调用用户handler流程](调用用户handler流程.png)
+![调用用户handler栈变换](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E5%85%AB/调用用户handler栈变换.png)
+![调用用户handler流程](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E5%85%AB/调用用户handler流程.png)
 
 内核需要从内核态返回到用户态，执行**用户态**空间中定义的信号handler，之后回到**内核态**空间，并返回**中断**、**异常**或**系统调用**前的用户态上下文继续执行。
 
@@ -571,7 +571,7 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 其基本思路就是在**内核态**堆栈保存的**用户态**栈上，分配一个[struct rt_sigframe](https://elixir.bootlin.com/linux/v5.17/source/arch/x86/um/signal.c#L481)结构。并在该结构中备份**用户态**上下文，并更改当前的**用户态**上下文为信号handler的上下文即可。
 
 其内核态堆栈变化如下所示
-![信号处理堆栈变换](信号处理堆栈变化.png)
+![信号处理堆栈变换](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E5%85%AB/信号处理堆栈变化.png)
 
 
 ### 执行过程
@@ -590,7 +590,7 @@ get_sigframe(struct k_sigaction *ka, struct pt_regs *regs, size_t frame_size,
 
 而当handler执行完后，其**返回地址**为**rsp**栈顶，也就是之前的**frame->pretcode**，即**ksig->ka.sa.sa_restorer**，其具体执行地址如下所示
 
-![指令内容](pretcode指向指令.png)
+![指令内容](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E5%85%AB/pretcode指向指令.png)
 
 实际上用户在注册handler，同样需要提供**sigaction**的**sa_restorer**，一般是**glibc**会将其覆盖为该指令地址。
 

@@ -82,7 +82,7 @@ Linux内核为了可以正常的管理内存，必须记录每个页框的状态
 ## struct free_area
 
 实际上，在每一个**zone**结构体中，都包含有一个**struct free_area[]**类型的字段，其就是伙伴系统的关键数据
-![buddy数据结构(安全客的图)](buddy数据结构.png)
+![buddy数据结构(安全客的图)](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%BA%8C/buddy数据结构.png)
 
 其中，**free_area**数组的第k个元素，其标示着大小为$$2^{k}$$的连续空闲页框的起始页描述符，其位于[include/linux/mmzone.h](https://elixir.bootlin.com/linux/v5.17/source/include/linux/mmzone.h#L97)路径的**struct free_area**的结构体有如下两个字段
 
@@ -411,7 +411,7 @@ void __free_pages(struct page *page, unsigned int order)
 可以看到，前面的内存管理都是以**页框**为单位，而这会导致很多**内部碎片**
 因此，Linux添加了**slub分配器**——其将内存区看做对象，并认为内核函数会反复请求同一个类型的对象，因此将释放的对象缓存起来，而非释放并合并
 slub分配器的组成如下所示
-![链接自https://my.oschina.net/fileoptions/blog/1630346](slub组成.png)
+![链接自https://my.oschina.net/fileoptions/blog/1630346](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%BA%8C/slub组成.png)
 
 
 ## struct kmem_cache

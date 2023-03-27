@@ -18,7 +18,7 @@ categories: ['内核']
 
 任何I/O设备有且仅能连接一条总线。CPU和I/O设备之间的数据通路通常被称为I/O总线。每个I/O设备依次连接到I/O总线上，这种连接包含3个元素的硬件组织层次：I/O端口、I/O接口和设备控制器，其构成如下所示
 
-![I/O体系结构](I-O体系结构.png)
+![I/O体系结构](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B9%9D/I-O体系结构.png)
 
 ## I/O端口
 
@@ -32,7 +32,7 @@ I/O端口还可以被映射到**物理地址空间**，从而处理器和**I/O**
 - CPU从**设备输入寄存器**(device input register)中获取设备数据
 - CPU把输出给设备的数据写入**设备输出寄存器**(device output register)
 
-![专用I/O端口.png](专用I-O端口.png)
+![专用I/O端口](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B9%9D/专用I-O端口.png)
 
 
 ## 访问I/O端口
@@ -217,7 +217,7 @@ Linux内核提供了**udev**工具集，从而支持动态创建设备文件
 当进程访问普通文件时，其会通过文件系统，访问磁盘分区中的一些数据块；而当进程访问设备文件时，其直接驱动硬件设备即可
 
 为此，Linux内核只需要在设备文件打开时，改变其缺省文件操作即可。把诸如**struct inode**或**struct file**等函数指针字段设置为与设备相关的函数即可
-![VFS处理样例-转载自https://ty-chen.github.io/linux-kernel-char-device/](I-O-VFS处理.png)
+![VFS处理样例-转载自https://ty-chen.github.io/linux-kernel-char-device/](./linux%E5%86%85%E6%A0%B8%E5%AD%A6%E4%B9%A0-%E4%B9%9D/I-O-VFS处理.png)
 
 
 # 设备驱动程序
